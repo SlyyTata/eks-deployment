@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Cancel a run in-progress when a newer commit is available
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+#use the uv version that the actions/setup-uv@v6 action installs
+env:
+  UV_PYTHON_PREFERENCE: only-system   # use the Python from actions/setup-python
+
+jobs:
+
+  #Unit test Job starts here
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@v4
+
+        
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.0"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # No database is needed: tests/conftest.py supplies dummy settings
+      - name: Run unit tests
+        run: uv run pytest tests/unit -v
+
+
+  # Integration-tests job: checking that the separate parts of this app work correctly together, not just on their own.
+  integration-tests:
+    name: Integration tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    # A real Postgres for this job only; it is thrown away when the job ends
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: realmile
+          POSTGRES_PASSWORD: realmile
+          POSTGRES_DB: realmile_test
+        ports:
+          - 5432:5432
+        # Don't start the steps until Postgres accepts connections
+        options: >-
+          --health-cmd "pg_isready -U realmile"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Throwaway values for the throwaway database above, not real secrets
+    env:
+      DATABASE_URL: postgresql+asyncpg://realmile:realmile@localhost:5432/realmile_test
+      DATABASE_SSL: "false"   # the CI Postgres has no SSL (Neon does)
+      SECRET_KEY: ci-test-secret-key
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      RUN_INTEGRATION_TESTS: "1"
+
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.0"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Same command the ECS migrate container runs, so migrations are tested too
+      - name: Apply database migrations
+        run: uv run python -m app.migrate
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration -v
+
+
+  notify-failure:
+    name: Alert team on Slack
+    needs: [unit-tests, integration-tests]
+    permissions: {}
+    uses: ./.github/workflows/notify-slack.yml
+    with:
+      results: ${{ toJSON(needs) }}
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

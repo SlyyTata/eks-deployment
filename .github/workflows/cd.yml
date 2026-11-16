@@ -1,0 +1,125 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deployments at once, and never cancel one halfway through
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+  AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  API_CONTAINER: ${{ vars.API_CONTAINER }}
+  MIGRATE_CONTAINER: ${{ vars.MIGRATE_CONTAINER }}
+  API_REPOSITORY: ${{ vars.API_REPOSITORY }}
+  WEB_CONTAINER: ${{ vars.WEB_CONTAINER }}
+  WEB_REPOSITORY: ${{ vars.WEB_REPOSITORY }}
+  NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.name }} image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read    # no AWS access needed: images go to Docker Hub
+    strategy:
+      # I used a matrix because the API and web images go through exactly the same steps:
+      # check out the code, set up Buildx, log in to Docker Hub, then build and push.
+      # Only a few values differ: the name, the repository, the folder and the build argument.
+      # The matrix lets me write the steps once and run them for each image.
+      matrix:
+        include:
+          - name: api
+            repository: ${{ vars.API_REPOSITORY }}
+            context: .
+            build-args: ""
+          - name: web
+            repository: ${{ vars.WEB_REPOSITORY }}
+            context: ./frontend
+            # Browser calls the API on the same address; the ALB routes /api/* to it
+            build-args: NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # The token is masked in logs; use a Docker Hub access token, not your password
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: true
+          build-args: ${{ matrix.build-args }}
+          tags: |
+            docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ matrix.repository }}:${{ github.sha }}
+            docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ matrix.repository }}:latest
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy_to_EKS:
+
+    #Start the deployment to EKS Cluster
+    name: Deploy to EKS
+    needs: [ publish ]
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Copy the code over
+        uses: actions/checkout@v7
+
+      - name: Configure AWS Credentials for China region audience
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: ${{var.region}}
+          role-to-assume: ${{ secrets.ROLE }}
+
+      # Deploy the exact images built above: docker.io/<user>/<repo>:<commit sha>
+      - name: Work out image names
+        run: |
+          echo "API_IMAGE=docker.io/${DOCKERHUB_USERNAME}/${API_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "WEB_IMAGE=docker.io/${DOCKERHUB_USERNAME}/${WEB_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      
+
+  
+  # posts an alert to the team's Slack channel
+  notify-slack:
+    name: Send custom event details to a Slack workflow
+    needs: [security-scan, terraform]
+    runs-on: ubuntu-latest
+    if: always()   # run even if a job above failed or was skipped
+    permissions: {}
+    steps:
+      - name: Post to Slack
+        uses: slackapi/slack-github-action@v4.0.0
+        with:
+          payload-delimiter: "_"
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: webhook-trigger
+          payload: |
+            status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || 'success' }}
+            security_scan: ${{ needs.security-scan.result }}
+            terraform: ${{ needs.terraform.result }}
+            repository: ${{ github.repository }}
+            branch: ${{ github.ref_name }}
+            event: ${{ github.event_name }}
+            actor: ${{ github.actor }}
+            run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
