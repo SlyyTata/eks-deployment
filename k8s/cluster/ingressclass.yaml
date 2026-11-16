@@ -1,0 +1,25 @@
+# Cluster-wide resources. Apply ONCE as a cluster admin (the CD role can't create these):
+#   kubectl apply -f k8s/cluster/ingressclass.yaml
+#
+# EKS Auto Mode has a built-in ALB controller; these tell it to build an
+# internet-facing ALB for any Ingress that uses ingressClassName: alb.
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: alb
+spec:
+  scheme: internet-facing
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+  annotations:
+    # Ingresses that don't name a class use this one
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: alb

@@ -14,8 +14,8 @@ env:
   DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
   AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
   AWS_REGION: ${{ vars.AWS_REGION }}
-  API_CONTAINER: ${{ vars.API_CONTAINER }}
-  MIGRATE_CONTAINER: ${{ vars.MIGRATE_CONTAINER }}
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
   API_REPOSITORY: ${{ vars.API_REPOSITORY }}
   WEB_CONTAINER: ${{ vars.WEB_CONTAINER }}
   WEB_REPOSITORY: ${{ vars.WEB_REPOSITORY }}
@@ -83,13 +83,13 @@ jobs:
 
     steps:
       - name: Copy the code over
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials for China region audience
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
-          aws-region: ${{var.region}}
-          role-to-assume: ${{ secrets.ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
 
       # Deploy the exact images built above: docker.io/<user>/<repo>:<commit sha>
       - name: Work out image names
@@ -97,13 +97,29 @@ jobs:
           echo "API_IMAGE=docker.io/${DOCKERHUB_USERNAME}/${API_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_ENV"
           echo "WEB_IMAGE=docker.io/${DOCKERHUB_USERNAME}/${WEB_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
-      
+      - name: Connect kubectl to the cluster
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Run database migrations
+        run: |
+          kubectl -n "$K8S_NAMESPACE" delete job migrate --ignore-not-found --wait=true
+          sed "s|API_IMAGE_PLACEHOLDER|$API_IMAGE|" k8s/migrate-job.yaml | kubectl -n "$K8S_NAMESPACE" apply -f -
+          kubectl -n "$K8S_NAMESPACE" wait --for=condition=complete job/migrate --timeout=300s \
+            || { kubectl -n "$K8S_NAMESPACE" logs job/migrate; exit 1; }
+
+      - name: Deploy api and web
+        run: |
+          sed "s|API_IMAGE_PLACEHOLDER|$API_IMAGE|" k8s/api.yaml | kubectl -n "$K8S_NAMESPACE" apply -f -
+          sed "s|WEB_IMAGE_PLACEHOLDER|$WEB_IMAGE|" k8s/web.yaml | kubectl -n "$K8S_NAMESPACE" apply -f -
+          kubectl -n "$K8S_NAMESPACE" apply -f k8s/ingress.yaml
+          kubectl -n "$K8S_NAMESPACE" rollout status deployment/api --timeout=300s
+          kubectl -n "$K8S_NAMESPACE" rollout status deployment/web --timeout=300s
 
   
   # posts an alert to the team's Slack channel
   notify-slack:
     name: Send custom event details to a Slack workflow
-    needs: [security-scan, terraform]
+    needs: [publish, deploy_to_EKS]
     runs-on: ubuntu-latest
     if: always()   # run even if a job above failed or was skipped
     permissions: {}
