@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
         
       - name: Set up Python
@@ -82,15 +82,15 @@ jobs:
 
     steps:
       - name: Checkout the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.14"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
           version: "0.8.0"
           enable-cache: true
@@ -108,7 +108,7 @@ jobs:
 
       - name: Save tests coverage
         id: coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: coverage
           path: coverage.xml
@@ -126,13 +126,13 @@ jobs:
 
     - name: Download coverage.xml uploaded from the integration job
       id: d-artifact
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         name: coverage
 
 
     - name: Static Application Security Test (SAST) with SonarQube 
-      uses: SonarSource/sonarqube-scan-action@v8.5.0 
+      uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       with:
@@ -155,7 +155,7 @@ jobs:
     permissions: {}
     steps:
       - name: Post to Slack
-        uses: slackapi/slack-github-action@v4.0.0
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d
         with:
           payload-delimiter: "_"
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
