@@ -141,7 +141,6 @@ jobs:
           -Dsonar.projectKey=SlyyTata_eks-deployment
           -Dsonar.python.coverage.reportPaths=coverage.xml
           -Dsonar.coverage.exclusions=tests/**,frontend/**,alembic/**,app/migrate.py,main.py
-          -Dsonar.coverage.exclusions=frontend/**,alembic/**,app/migrate.py,main.py
           -Dsonar.python.version=3.14
           -Dsonar.qualitygate.wait=true
           -Dsonar.exclusions=coverage.xml
