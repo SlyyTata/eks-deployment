@@ -25,6 +25,10 @@ env:
 jobs:
   publish:
     name: Publish ${{ matrix.name }} image
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     permissions:
       contents: read    # no AWS access needed: images go to Docker Hub
@@ -116,7 +120,7 @@ jobs:
           kubectl -n "$K8S_NAMESPACE" rollout status deployment/api --timeout=300s
           kubectl -n "$K8S_NAMESPACE" rollout status deployment/web --timeout=300s
 
-  
+
   # posts an alert to the team's Slack channel
   notify-slack:
     name: Send custom event details to a Slack workflow
