@@ -25,7 +25,11 @@ env:
 jobs:
   publish:
     name: Publish ${{ matrix.name }} image
-    
+    # Only deploy when CI passed on a push to main (or when run manually)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     permissions:
       contents: read    # no AWS access needed: images go to Docker Hub
