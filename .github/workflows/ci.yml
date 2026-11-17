@@ -132,7 +132,7 @@ jobs:
 
 
     - name: Static Application Security Test (SAST) with SonarQube 
-      uses: SonarSource/sonarqube-scan-action@v8.3.0 
+      uses: SonarSource/sonarqube-scan-action@v8.5.0 
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       with:
@@ -140,11 +140,12 @@ jobs:
           -Dsonar.organization=slyytata
           -Dsonar.projectKey=SlyyTata_eks-deployment
           -Dsonar.python.coverage.reportPaths=coverage.xml
-          -Dsonar.sources=app,frontend
-          -Dsonar.tests=tests
+          -Dsonar.coverage.exclusions=tests/**,frontend/**,alembic/**,app/migrate.py,main.py
           -Dsonar.coverage.exclusions=frontend/**,alembic/**,app/migrate.py,main.py
           -Dsonar.python.version=3.14
           -Dsonar.qualitygate.wait=true
+          -Dsonar.exclusions=coverage.xml
+
 
       # posts an alert to the team's Slack channel
   notify-slack:
