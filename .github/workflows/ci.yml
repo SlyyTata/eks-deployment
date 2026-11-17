@@ -98,20 +98,75 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      # Same command the ECS migrate container runs, so migrations are tested too
       - name: Apply database migrations
         run: uv run python -m app.migrate
 
-      - name: Run integration tests
-        run: uv run pytest tests/integration -v
+      - name: Run tests with coverage
+        run: |
+          uv run pytest tests/unit --cov=app
+          uv run pytest tests/integration --cov=app --cov-append --cov-report=xml
 
+      - name: Save tests coverage
+        id: coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
 
-  notify-failure:
-    name: Alert team on Slack
+  sonarQube:
+    name: Using the sonarqube cloud
     needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout the code
+      uses: actions/checkout@v7
+      with:
+        # Disabling shallow clones is recommended for improving the relevancy of reporting
+        fetch-depth: 0
+
+    - name: Download coverage.xml uploaded from the integration job
+      id: d-artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: coverage
+
+
+    - name: Static Application Security Test (SAST) with SonarQube 
+      uses: SonarSource/sonarqube-scan-action@v8.5.0 
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      with:
+        args: >
+          -Dsonar.organization=slyytata
+          -Dsonar.projectKey=SlyyTata_eks-deployment
+          -Dsonar.python.coverage.reportPaths=coverage.xml
+          -Dsonar.sources=app,frontend
+          -Dsonar.tests=tests
+          -Dsonar.coverage.exclusions=frontend/**,alembic/**,app/migrate.py,main.py
+          -Dsonar.python.version=3.14
+          -Dsonar.qualitygate.wait=true
+
+      # posts an alert to the team's Slack channel
+  notify-slack:
+    name: Send custom event details to a Slack workflow
+    needs: [unit-tests, integration-tests, sonarQube]
+    runs-on: ubuntu-latest
+    if: always()   # run even if a job above failed or was skipped
     permissions: {}
-    uses: ./.github/workflows/notify-slack.yml
-    with:
-      results: ${{ toJSON(needs) }}
-    secrets:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - name: Post to Slack
+        uses: slackapi/slack-github-action@v4.0.0
+        with:
+          payload-delimiter: "_"
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: webhook-trigger
+          payload: |
+            status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || 'success' }}
+            repository: ${{ github.repository }}
+            unit-tests: ${{ needs.unit-tests.result }}
+            integration: ${{ needs.integration-tests.result }}
+            sonarqube: ${{ needs.sonarQube.result }}
+            branch: ${{ github.ref_name }}
+            event: ${{ github.event_name }}
+            actor: ${{ github.actor }}
+            run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

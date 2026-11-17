@@ -36,3 +36,6 @@ asyncio_default_fixture_loop_scope = "function"
 # skipped/failed test in the summary so nothing is hidden.
 addopts = "--strict-markers --strict-config -ra"
 xfail_strict = true
+
+[tool.coverage.run]
+relative_files = true

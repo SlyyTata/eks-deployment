@@ -1,9 +1,11 @@
 name: CD
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 # Never run two deployments at once, and never cancel one halfway through
 concurrency:
@@ -17,7 +19,6 @@ env:
   EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
   K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
   API_REPOSITORY: ${{ vars.API_REPOSITORY }}
-  WEB_CONTAINER: ${{ vars.WEB_CONTAINER }}
   WEB_REPOSITORY: ${{ vars.WEB_REPOSITORY }}
   NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
 
@@ -132,8 +133,8 @@ jobs:
           webhook-type: webhook-trigger
           payload: |
             status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || 'success' }}
-            security_scan: ${{ needs.security-scan.result }}
-            terraform: ${{ needs.terraform.result }}
+            publish: ${{ needs.publish.result }}
+            deploy: ${{ needs.deploy_to_EKS.result }}
             repository: ${{ github.repository }}
             branch: ${{ github.ref_name }}
             event: ${{ github.event_name }}
