@@ -6,7 +6,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
 # Install dependencies first so Docker can reuse this layer when only code changes
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --no-build
 
 COPY app ./app
 COPY alembic ./alembic
